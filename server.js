@@ -32,7 +32,7 @@ app.post('/api/generate-docs', async (req, res) => {
 
         // Llamada al modelo Gemini
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-1.5-flash',
             contents: prompt,
         });
 
