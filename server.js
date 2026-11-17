@@ -1,42 +1,38 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '15mb' }));
 app.use(cors());
-
-const ai = new GoogleGenAI();
 
 app.post('/api/generate-docs', async (req, res) => {
     const { processDescription, objectsData } = req.body;
 
-    if (!processDescription && (!objectsData || objectsData.length === 0)) {
-        return res.status(400).json({ error: 'Falta la descripción del proceso o los objetos.' });
+    if (!objectsData || objectsData.length === 0) {
+        return res.status(400).json({ success: false, error: 'Faltan objetos para documentar.' });
     }
 
     try {
-        const objectsSummary = objectsData.map(obj => 
-            `--- OBJETO: ${obj.name} (${obj.type}) ---\n${obj.code}`
+        const codeCombined = objectsData.map(obj => 
+            `=== OBJETO: ${obj.name} (${obj.type}) ===\n${obj.code}`
         ).join('\n\n');
 
         const prompt = `
-            Eres un Arquitecto Técnico SAP S/4HANA experto. Redacta una Especificación Técnica y Funcional completa de un PROCESO END-TO-END en formato HTML limpio (sin etiquetas markdown como \`\`\`html).
+            Eres un Arquitecto Técnico SAP S/4HANA experto. Analiza el siguiente proceso y los códigos fuente asociados, y redacta una Especificación Técnica y Funcional completa en formato HTML limpio (sin bloques de código markdown como \`\`\`html).
 
-            Contexto / Descripción del Proceso dada por el consultor:
-            "${processDescription || 'No proporcionada, deducir del código.'}"
+            Descripción del Proceso:
+            "${processDescription || 'Análisis técnico de integración de componentes ABAP'}"
 
-            Código fuente de los objetos involucrados en el proceso:
-            ${objectsSummary}
+            Códigos fuente:
+            ${codeCombined}
 
-            Estructura obligatoria del documento HTML:
+            Estructura obligatoria:
             <h2>1. Resumen Ejecutivo y Objetivo del Proceso</h2>
             <p>Explicación clara de negocio y flujo general.</p>
             <h2>2. Arquitectura y Objetos Involucrados</h2>
             <table>
                 <tr><th>Objeto</th><th>Tipo</th><th>Rol en el Proceso</th></tr>
-                <!-- Rellenar con cada objeto analizado -->
             </table>
             <h2>3. Flujo Detallado Paso a Paso</h2>
             <p>Cómo interactúan los Reports, Clases, Vistas CDS y tablas entre sí.</p>
@@ -44,20 +40,40 @@ app.post('/api/generate-docs', async (req, res) => {
             <p>Tablas principales leídas/actualizadas y recomendaciones técnicas.</p>
         `;
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }]
+        // Llamada directa a la API gratuita y ultrarrápida de Groq
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                messages: [
+                    { role: 'system', content: 'Eres un Arquitecto SAP experto que responde únicamente en HTML limpio.' },
+                    { role: 'user', content: prompt }
+                ],
+                temperature: 0.2
+            })
         });
 
-        res.json({ success: true, documentation: response.text });
+        if (!response.ok) {
+            const errData = await response.text();
+            throw new Error(`Error Groq (${response.status}): ${errData}`);
+        }
+
+        const data = await response.json();
+        const textResult = data.choices?.[0]?.message?.content || 'No se pudo generar contenido.';
+
+        res.json({ success: true, documentation: textResult });
 
     } catch (error) {
-        console.error('Error con la IA:', error);
+        console.error('Error detallado en backend:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Backend de IA corriendo en puerto ${PORT}`);
+    console.log(`🚀 Backend corriendo en puerto ${PORT}`);
 });
