@@ -44,6 +44,57 @@ function analyzeAbapDependencies(code) {
     };
 }
 
+// Endpoint NUEVO: Resolución inteligente de Transacciones (TCode) mediante IA
+app.post('/api/resolve-tcode', async (req, res) => {
+    const { inputName } = req.body;
+    let cleanInput = (inputName || '').trim().toUpperCase();
+
+    if (!cleanInput) {
+        return res.status(400).json({ success: false, error: 'Falta el nombre de objeto o transacción.' });
+    }
+
+    try {
+        // Si parece un TCode (empieza por ZT o no sigue el estándar directo de programas/clases)
+        console.log(`🧠 [IA Resolver] Analizando transacción o identificador: ${cleanInput}`);
+        
+        const prompt = `
+            Eres un experto Arquitecto SAP ABAP. Un consultor ha introducido este identificador en la herramienta: "${cleanInput}".
+            En los sistemas SAP S/4HANA, las transacciones (como ZTR...) apuntan a un programa ejecutable (como ZR...) o clase global.
+            Devuelve ÚNICAMENTE el nombre técnico del programa ejecutable o clase ABAP que le corresponde lógicamente según las convenciones estándar de SAP, sin texto adicional, sin explicaciones y sin bloques markdown, solo el nombre exacto en mayúsculas.
+        `;
+
+        const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'openai/gpt-oss-20b',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.1
+            })
+        });
+
+        if (!aiResponse.ok) {
+            return res.json({ success: true, resolvedName: cleanInput });
+        }
+
+        const aiData = await aiResponse.json();
+        let guessedName = aiData.choices?.[0]?.message?.content?.trim().toUpperCase();
+        
+        // Limpiamos por si la IA devuelve saltos de línea o caracteres extraños
+        guessedName = guessedName ? guessedName.replace(/[^A-Z0-9_/]/g, '') : cleanInput;
+
+        console.log(`🤖 [IA Resolver] Transacción '${cleanInput}' traducida al programa técnico: '${guessedName}'`);
+        res.json({ success: true, resolvedName: guessedName || cleanInput });
+
+    } catch (error) {
+        console.error('Error resolviendo TCode con IA:', error);
+        res.json({ success: true, resolvedName: cleanInput }); // Fallback seguro
+    }
+});
+
 // Endpoint 1: Generación de documentación con IA (Groq)
 app.post('/api/generate-docs', async (req, res) => {
     const { processDescription, objectsData } = req.body;
