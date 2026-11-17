@@ -6,8 +6,8 @@ const app = express();
 app.use(express.json({ limit: '15mb' }));
 app.use(cors());
 
-// Función para extraer dependencias y acotar el código si es gigantesco
-function analyzeAndTrimAbapCode(code, maxLength = 4000) {
+// Motor de extracción estática de dependencias ABAP
+function analyzeAbapDependencies(code) {
     const includes = new Set();
     const tables = new Set();
     const bapis = new Set();
@@ -31,10 +31,9 @@ function analyzeAndTrimAbapCode(code, maxLength = 4000) {
         bapis.add(match[1].toUpperCase());
     }
 
-    // Si el código es muy largo, recortamos de forma inteligente para no superar los TPM de Groq
     let trimmedCode = code;
-    if (code.length > maxLength) {
-        trimmedCode = code.substring(0, maxLength) + "\n\n... [Código recortado automáticamente por exceso de tamaño para optimizar tokens] ...";
+    if (code.length > 5000) {
+        trimmedCode = code.substring(0, 5000) + "\n\n... [Código optimizado para análisis de IA] ...";
     }
 
     return {
@@ -57,7 +56,7 @@ app.post('/api/generate-docs', async (req, res) => {
         let globalDependencies = { includes: [], tables: [], bapis: [] };
 
         objectsData.forEach(obj => {
-            const analysis = analyzeAndTrimAbapCode(obj.code);
+            const analysis = analyzeAbapDependencies(obj.code);
             combinedCode += `=== OBJETO: ${obj.name} (${obj.type}) ===\n${analysis.trimmedCode}\n\n`;
             
             globalDependencies.includes.push(...analysis.includes);
@@ -69,23 +68,38 @@ app.post('/api/generate-docs', async (req, res) => {
         globalDependencies.tables = [...new Set(globalDependencies.tables)];
         globalDependencies.bapis = [...new Set(globalDependencies.bapis)];
 
+        // Prompt de Agente Experto SAP con capacidad investigadora
         const prompt = `
-            Eres un Arquitecto Técnico SAP S/4HANA experto. Analiza el proceso y las dependencias detectadas.
+            Actúa como un Arquitecto Técnico SAP S/4HANA Senior e investigador de código fuente ABAP.
+            Tu misión es analizar el código proporcionado, deducir la investigación end-to-end del proceso, 
+            relacionar los includes detectados y estructurar un flujograma técnico impecable.
 
-            Descripción: "${processDescription || 'Análisis técnico'}"
-            Includes: ${globalDependencies.includes.join(', ') || 'Ninguno'}
-            Tablas: ${globalDependencies.tables.join(', ') || 'Ninguna'}
-            BAPIs: ${globalDependencies.bapis.join(', ') || 'Ninguna'}
+            - Contexto del Usuario: "${processDescription || 'Análisis técnico general'}"
+            - Includes descubiertos automáticamente: ${globalDependencies.includes.join(', ') || 'Ninguno'}
+            - Tablas / Vistas accedidas: ${globalDependencies.tables.join(', ') || 'Ninguna'}
+            - BAPIs / Funciones invocadas: ${globalDependencies.bapis.join(', ') || 'Ninguna'}
 
-            Código:
+            Código Fuente Analizado:
             ${combinedCode}
 
-            Genera una Especificación Técnica en formato HTML limpio (sin bloques de código markdown como \`\`\`html) estructurada en:
-            <h2>1. Resumen Ejecutivo</h2><p>...</p>
-            <h2>2. Diagrama de Flujo del Proceso</h2><p>Esquema paso a paso detallado.</p>
-            <h2>3. Arquitectura y Objetos</h2><table><tr><th>Componente</th><th>Tipo</th><th>Rol</th></tr></table>
-            <h2>4. Lógica Detallada</h2><p>...</p>
-            <h2>5. Tablas y Clean Core</h2><p>...</p>
+            Genera una Especificación Técnica y Funcional completa en formato HTML limpio (sin bloques de código markdown como \`\`\`html), estructurada exactamente así:
+
+            <h2>1. Resumen Ejecutivo y Objetivo</h2>
+            <p>Propósito técnico y de negocio del desarrollo analizado.</p>
+
+            <h2>2. Diagrama de Flujo del Proceso (Flujograma Secuencial)</h2>
+            <p>Esquema paso a paso detallado (Paso 1: Entrada/Transacción ➔ Paso 2: Validación ➔ Paso 3: Ejecución en Includes/Clases ➔ Paso 4: Base de Datos ➔ Paso 5: Salida).</p>
+
+            <h2>3. Arquitectura y Relación de Objetos</h2>
+            <table>
+                <tr><th>Componente / Include</th><th>Tipo</th><th>Rol e Interacción en el Proceso</th></tr>
+            </table>
+
+            <h2>4. Lógica Detallada y Puntos Críticos</h2>
+            <p>Explicación técnica de cómo interactúan los includes, validaciones y tratamiento de errores.</p>
+
+            <h2>5. Tablas Afectadas y Consideraciones Clean Core</h2>
+            <p>Tablas involucradas y recomendaciones de rendimiento S/4HANA.</p>
         `;
 
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -97,7 +111,7 @@ app.post('/api/generate-docs', async (req, res) => {
             body: JSON.stringify({
                 model: 'openai/gpt-oss-20b',
                 messages: [
-                    { role: 'system', content: 'Eres un Arquitecto SAP experto que responde únicamente en HTML limpio.' },
+                    { role: 'system', content: 'Eres un Arquitecto SAP experto que investiga código y responde únicamente en HTML limpio.' },
                     { role: 'user', content: prompt }
                 ],
                 temperature: 0.2
