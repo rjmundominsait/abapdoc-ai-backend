@@ -4,41 +4,49 @@ require('dotenv').config();
 const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
-// Inicializar el SDK oficial de Google GenAI (toma GEMINI_API_KEY de las variables de entorno de Render)
 const ai = new GoogleGenAI();
 
 app.post('/api/generate-docs', async (req, res) => {
-    const { objectName, abapCode } = req.body;
+    const { processDescription, objectsData } = req.body;
 
-    if (!abapCode) {
-        return res.status(400).json({ error: 'Falta el código ABAP' });
+    if (!processDescription && (!objectsData || objectsData.length === 0)) {
+        return res.status(400).json({ error: 'Falta la descripción del proceso o los objetos.' });
     }
 
     try {
-        // Prompt estructurado para que la IA actúe como Arquitecto SAP
-        const prompt = `
-            Eres un Arquitecto Técnico SAP experto. Analiza el siguiente código fuente ABAP del objeto '${objectName}' y redacta una especificación técnica profesional en formato HTML limpio que incluya:
-            1. Resumen funcional del programa.
-            2. Tablas de Base de Datos (DDIC) o estructuras utilizadas.
-            3. Lógica detallada paso a paso.
-            4. Puntos críticos o recomendaciones Clean Core.
+        const objectsSummary = objectsData.map(obj => 
+            `--- OBJETO: ${obj.name} (${obj.type}) ---\n${obj.code}`
+        ).join('\n\n');
 
-            Código ABAP:
-            ${abapCode}
+        const prompt = `
+            Eres un Arquitecto Técnico SAP S/4HANA experto. Redacta una Especificación Técnica y Funcional completa de un PROCESO END-TO-END en formato HTML limpio (sin etiquetas markdown como \`\`\`html).
+
+            Contexto / Descripción del Proceso dada por el consultor:
+            "${processDescription || 'No proporcionada, deducir del código.'}"
+
+            Código fuente de los objetos involucrados en el proceso:
+            ${objectsSummary}
+
+            Estructura obligatoria del documento HTML:
+            <h2>1. Resumen Ejecutivo y Objetivo del Proceso</h2>
+            <p>Explicación clara de negocio y flujo general.</p>
+            <h2>2. Arquitectura y Objetos Involucrados</h2>
+            <table>
+                <tr><th>Objeto</th><th>Tipo</th><th>Rol en el Proceso</th></tr>
+                <!-- Rellenar con cada objeto analizado -->
+            </table>
+            <h2>3. Flujo Detallado Paso a Paso</h2>
+            <p>Cómo interactúan los Reports, Clases, Vistas CDS y tablas entre sí.</p>
+            <h2>4. Tablas Estándar / Z y Puntos Críticos (Clean Core)</h2>
+            <p>Tablas principales leídas/actualizadas y recomendaciones técnicas.</p>
         `;
 
-        // Llamada al modelo oficial actual exigido por la API
         const response = await ai.models.generateContent({
             model: 'gemini-3.8-flash',
-            contents: [
-                {
-                    role: 'user',
-                    parts: [{ text: prompt }]
-                }
-            ]
+            contents: [{ role: 'user', parts: [{ text: prompt }] }]
         });
 
         res.json({ success: true, documentation: response.text });
