@@ -126,10 +126,10 @@ app.post('/api/generate-docs', async (req, res) => {
             Tu misión es analizar el código proporcionado, deducir la investigación end-to-end del proceso, 
             relacionar los includes detectados y estructurar un flujograma técnico impecable.
 
-            - Contexto del Usuario: "${processDescription || 'Análisis técnico general'}"
-            - Includes descubiertos automáticamente: ${globalDependencies.includes.join(', ') || 'Ninguno'}
-            - Tablas / Vistas accedidas: ${globalDependencies.tables.join(', ') || 'Ninguna'}
-            - BAPIs / Funciones invocadas: ${globalDependencies.bapis.join(', ') || 'Ninguna'}
+- Contexto del Usuario: "${processDescription || 'Análisis técnico general'}"
+- Includes descubiertos automáticamente: ${globalDependencies.includes.join(', ') || 'Ninguno'}
+- Tablas / Vistas accedidas: ${globalDependencies.tables.join(', ') || 'Ninguna'}
+- BAPIs / Funciones invocadas: ${globalDependencies.bapis.join(', ') || 'Ninguna'}
 
             Código Fuente Analizado:
             ${combinedCode}
@@ -140,7 +140,17 @@ app.post('/api/generate-docs', async (req, res) => {
             <p>Propósito técnico y de negocio del desarrollo analizado.</p>
 
             <h2>2. Diagrama de Flujo del Proceso (Flujograma Secuencial)</h2>
-            <p>Esquema paso a paso detallado (Paso 1: Entrada/Transacción ➔ Paso 2: Validación ➔ Paso 3: Ejecución en Includes/Clases ➔ Paso 4: Base de Datos ➔ Paso 5: Salida).</p>
+            <p>Incluye obligatoriamente un esquema visual de flujo secuencial utilizando una tabla HTML estilizada con celdas y flechas (➔), estructurada de izquierda a derecha o en bloques claros para representar el proceso end-to-end (ej. Transacción ➔ Programa/Includes ➔ Validación/BAPI ➔ Actualización de Base de Datos).</p>
+            <table style="width: 100%; border-collapse: collapse; margin: 15px 0; background-color: #f8fafc;">
+                <tr>
+                    <td style="width: 30%; text-align: center; border: 1px solid #cbd5e1; padding: 10px; background: #ffffff;"><strong>1. Entrada</strong><br/><span style="font-size: 9pt; color: #64748b;">Objeto / TCode</span></td>
+                    <td style="width: 5%; text-align: center; border: none; font-size: 14pt; color: #0070f2;">➔</td>
+                    <td style="width: 30%; text-align: center; border: 1px solid #cbd5e1; padding: 10px; background: #ffffff;"><strong>2. Procesamiento</strong><br/><span style="font-size: 9pt; color: #64748b;">Includes / Lógica</span></td>
+                    <td style="width: 5%; text-align: center; border: none; font-size: 14pt; color: #0070f2;">➔</td>
+                    <td style="width: 30%; text-align: center; border: 1px solid #cbd5e1; padding: 10px; background: #ffffff;"><strong>3. Persistencia</strong><br/><span style="font-size: 9pt; color: #64748b;">Tablas / BAPIs</span></td>
+                </tr>
+            </table>
+            <p>Añade debajo una breve descripción paso a paso de los hitos observados en el código fuente.</p>
 
             <h2>3. Arquitectura y Relación de Objetos</h2>
             <table>
@@ -153,6 +163,7 @@ app.post('/api/generate-docs', async (req, res) => {
             <h2>5. Tablas Afectadas y Consideraciones Clean Core</h2>
             <p>Tablas involucradas y recomendaciones de rendimiento S/4HANA.</p>
         `;
+            
 
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
