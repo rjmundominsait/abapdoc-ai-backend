@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Inicializar el SDK oficial de Google GenAI (necesita tu GEMINI_API_KEY en las variables de entorno)
+// Inicializar el SDK oficial de Google GenAI (toma GEMINI_API_KEY de las variables de entorno de Render)
 const ai = new GoogleGenAI();
 
 app.post('/api/generate-docs', async (req, res) => {
@@ -30,9 +30,9 @@ app.post('/api/generate-docs', async (req, res) => {
             ${abapCode}
         `;
 
-        // Llamada al modelo Gemini con la estructura correcta
+        // Llamada al modelo oficial actual exigido por la API
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.8-flash',
             contents: [
                 {
                     role: 'user',
