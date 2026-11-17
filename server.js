@@ -135,49 +135,6 @@ app.post('/api/generate-docs', async (req, res) => {
     }
 });
 
-// Endpoint 2: Proxy seguro para descargar el código fuente desde SAP ADT sin CORS
-app.post('/api/fetch-sap-code', async (req, res) => {
-    const { sapUrl, objectName } = req.body;
-
-    if (!sapUrl || !objectName) {
-        return res.status(400).json({ success: false, error: 'Faltan parámetros de URL o nombre de objeto.' });
-    }
-
-    try {
-        const cleanBaseUrl = sapUrl.replace(/\/+$/, '');
-        const targetUrl = `${cleanBaseUrl}/sap/bc/adt/programs/programs/${encodeURIComponent(objectName)}/source/main`;
-
-        console.log(`🔍 [Backend Proxy] Consultando SAP ADT: ${targetUrl}`);
-
-        const response = await fetch(targetUrl, {
-            method: 'GET',
-            headers: {
-                'Accept': 'text/plain, application/vnd.sap.adt.abapsources.v1+plain, */*',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        });
-
-        if (!response.ok) {
-            return res.status(response.status).json({ 
-                success: false, 
-                error: `SAP devolvió el estado HTTP ${response.status}. Comprueba que el programa '${objectName}' exista.` 
-            });
-        }
-
-        const codeText = await response.text();
-        
-        if (codeText.includes('<!DOCTYPE html>') || codeText.includes('<html')) {
-            return res.status(401).json({ success: false, error: 'La respuesta de SAP fue una página de login. Verifica la sesión.' });
-        }
-
-        res.json({ success: true, code: codeText });
-
-    } catch (error) {
-        console.error('Error en proxy SAP (Render):', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Backend corriendo en puerto ${PORT}`);
