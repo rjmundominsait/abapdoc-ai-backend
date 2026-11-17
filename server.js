@@ -40,7 +40,7 @@ app.post('/api/generate-docs', async (req, res) => {
             <p>Tablas principales leídas/actualizadas y recomendaciones técnicas.</p>
         `;
 
-        // Llamada directa a la API gratuita y ultrarrápida de Groq
+        // Llamada a Groq utilizando un modelo estándar y ultra-rápido soportado
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -48,7 +48,7 @@ app.post('/api/generate-docs', async (req, res) => {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',
+                model: 'llama-3.1-8b-instant',
                 messages: [
                     { role: 'system', content: 'Eres un Arquitecto SAP experto que responde únicamente en HTML limpio.' },
                     { role: 'user', content: prompt }
