@@ -30,11 +30,17 @@ app.post('/api/generate-docs', async (req, res) => {
             ${abapCode}
         `;
 
-        // Llamada al modelo Gemini
+        // Llamada al modelo Gemini con la estructura correcta
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: [ ... ]
+            contents: [
+                {
+                    role: 'user',
+                    parts: [{ text: prompt }]
+                }
+            ]
         });
+
         res.json({ success: true, documentation: response.text });
 
     } catch (error) {
@@ -43,7 +49,7 @@ app.post('/api/generate-docs', async (req, res) => {
     }
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Backend de IA corriendo en http://localhost:${PORT}`);
+    console.log(`🚀 Backend de IA corriendo en puerto ${PORT}`);
 });
