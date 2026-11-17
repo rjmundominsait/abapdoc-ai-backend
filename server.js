@@ -6,39 +6,42 @@ const app = express();
 app.use(express.json({ limit: '15mb' }));
 app.use(cors());
 
-// Función para indagar y extraer automáticamente dependencias del código ABAP
-function analyzeAbapDependencies(code) {
+// Función para extraer dependencias y acotar el código si es gigantesco
+function analyzeAndTrimAbapCode(code, maxLength = 4000) {
     const includes = new Set();
     const tables = new Set();
     const bapis = new Set();
 
-    // Regex para detectar includes: INCLUDE z... o INCLUDE zur...
     const includeRegex = /\bINCLUDE\s+([a-zA-Z0-9_/]+)/gi;
     let match;
     while ((match = includeRegex.exec(code)) !== null) {
         includes.add(match[1].toUpperCase());
     }
 
-    // Regex para detectar tablas en SELECT, UPDATE, INSERT, MODIFY, DELETE
     const tableRegex = /\b(?:FROM|INTO|UPDATE|INTO TABLE|FROM TABLE|JOIN)\s+([a-zA-Z0-9_/]+)/gi;
     while ((match = tableRegex.exec(code)) !== null) {
         const tableName = match[1].toUpperCase();
-        // Filtrar palabras reservadas comunes de ABAP para dejar solo tablas
         if (!['CORRESPONDING', 'TABLE', 'FIELDS', 'CLIENT', 'SPECIFIED', 'DBTABLE'].includes(tableName)) {
             tables.add(tableName);
         }
     }
 
-    // Regex para detectar llamadas a funciones o BAPIs
     const bapiRegex = /\bCALL\s+FUNCTION\s+['"]([a-zA-Z0-9_/]+)['"]/gi;
     while ((match = bapiRegex.exec(code)) !== null) {
         bapis.add(match[1].toUpperCase());
     }
 
+    // Si el código es muy largo, recortamos de forma inteligente para no superar los TPM de Groq
+    let trimmedCode = code;
+    if (code.length > maxLength) {
+        trimmedCode = code.substring(0, maxLength) + "\n\n... [Código recortado automáticamente por exceso de tamaño para optimizar tokens] ...";
+    }
+
     return {
         includes: Array.from(includes),
         tables: Array.from(tables),
-        bapis: Array.from(bapis)
+        bapis: Array.from(bapis),
+        trimmedCode
     };
 }
 
@@ -50,60 +53,41 @@ app.post('/api/generate-docs', async (req, res) => {
     }
 
     try {
-        // 1. Unir código y extraer automáticamente dependencias ocultas
         let combinedCode = '';
         let globalDependencies = { includes: [], tables: [], bapis: [] };
 
         objectsData.forEach(obj => {
-            combinedCode += `=== OBJETO PRINCIPAL / INCLUDE: ${obj.name} (${obj.type}) ===\n${obj.code}\n\n`;
-            const deps = analyzeAbapDependencies(obj.code);
-            globalDependencies.includes.push(...deps.includes);
-            globalDependencies.tables.push(...deps.tables);
-            globalDependencies.bapis.push(...deps.bapis);
+            const analysis = analyzeAndTrimAbapCode(obj.code);
+            combinedCode += `=== OBJETO: ${obj.name} (${obj.type}) ===\n${analysis.trimmedCode}\n\n`;
+            
+            globalDependencies.includes.push(...analysis.includes);
+            globalDependencies.tables.push(...analysis.tables);
+            globalDependencies.bapis.push(...analysis.bapis);
         });
 
-        // Limpiar duplicados
         globalDependencies.includes = [...new Set(globalDependencies.includes)];
         globalDependencies.tables = [...new Set(globalDependencies.tables)];
         globalDependencies.bapis = [...new Set(globalDependencies.bapis)];
 
-        // 2. Construir un prompt inteligente y enriquecido para la IA
         const prompt = `
-            Eres un Arquitecto Técnico SAP S/4HANA experto e investigador de código fuente. 
-            Analiza en profundidad el siguiente proceso, el código fuente y las dependencias detectadas automáticamente.
+            Eres un Arquitecto Técnico SAP S/4HANA experto. Analiza el proceso y las dependencias detectadas.
 
-            Contexto y Descripción aportada:
-            "${processDescription || 'Análisis técnico end-to-end'}"
+            Descripción: "${processDescription || 'Análisis técnico'}"
+            Includes: ${globalDependencies.includes.join(', ') || 'Ninguno'}
+            Tablas: ${globalDependencies.tables.join(', ') || 'Ninguna'}
+            BAPIs: ${globalDependencies.bapis.join(', ') || 'Ninguna'}
 
-            Dependencias técnicas detectadas automáticamente en el código:
-            - Includes identificados: ${globalDependencies.includes.join(', ') || 'Ninguno'}
-            - Tablas / Vistas accedidas: ${globalDependencies.tables.join(', ') || 'Ninguna'}
-            - BAPIs / Módulos de Funciones llamados: ${globalDependencies.bapis.join(', ') || 'Ninguno'}
-
-            Códigos fuente fuente fuente:
+            Código:
             ${combinedCode}
 
-            Genera una Especificación Técnica y Funcional exhaustiva en formato HTML limpio (sin bloques de código markdown como \`\`\`html), cumpliendo estrictamente con esta estructura:
-
-            <h2>1. Resumen Ejecutivo y Objetivo del Negocio</h2>
-            <p>Propósito del desarrollo, transacciones asociadas mencionadas y alcance general.</p>
-
-            <h2>2. Diagrama de Flujo del Proceso (Flujograma Secuencial)</h2>
-            <p>Esquema paso a paso detallado en formato HTML (Paso 1: Entrada/Transacción -> Paso 2: Validación -> Paso 3: Ejecución de Lógica en Includes/Clases -> Paso 4: Acceso a Base de Datos -> Paso 5: Salida).</p>
-
-            <h2>3. Arquitectura, Relación de Includes y Objetos Involucrados</h2>
-            <table>
-                <tr><th>Componente / Include</th><th>Tipo</th><th>Propósito e Interacción detectada</th></tr>
-            </table>
-
-            <h2>4. Lógica Detallada y Puntos Críticos (Clean Core)</h2>
-            <p>Explicación técnica de cómo se enlazan los includes analizados, validaciones clave, tratamiento de errores y llamadas a BAPIs.</p>
-
-            <h2>5. Tablas Afectadas y Consideraciones de Rendimiento</h2>
-            <p>Listado de tablas leídas/actualizadas y recomendaciones técnicas para S/4HANA.</p>
+            Genera una Especificación Técnica en formato HTML limpio (sin bloques de código markdown como \`\`\`html) estructurada en:
+            <h2>1. Resumen Ejecutivo</h2><p>...</p>
+            <h2>2. Diagrama de Flujo del Proceso</h2><p>Esquema paso a paso detallado.</p>
+            <h2>3. Arquitectura y Objetos</h2><table><tr><th>Componente</th><th>Tipo</th><th>Rol</th></tr></table>
+            <h2>4. Lógica Detallada</h2><p>...</p>
+            <h2>5. Tablas y Clean Core</h2><p>...</p>
         `;
 
-        // 3. Llamada al modelo operativo de Groq
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -113,7 +97,7 @@ app.post('/api/generate-docs', async (req, res) => {
             body: JSON.stringify({
                 model: 'openai/gpt-oss-20b',
                 messages: [
-                    { role: 'system', content: 'Eres un Arquitecto SAP experto que analiza código y dependencias, respondiendo únicamente en HTML limpio.' },
+                    { role: 'system', content: 'Eres un Arquitecto SAP experto que responde únicamente en HTML limpio.' },
                     { role: 'user', content: prompt }
                 ],
                 temperature: 0.2
