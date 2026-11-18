@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json({ limit: '15mb' }));
 app.use(cors());
 
-// Motor de extracción estática de dependencias ABAP (con límite más estricto por bloque)
+// Motor de extracción estática de dependencias ABAP (con límite estricto por bloque)
 function analyzeAbapDependencies(code) {
     const includes = new Set();
     const tables = new Set();
@@ -31,7 +31,6 @@ function analyzeAbapDependencies(code) {
         bapis.add(match[1].toUpperCase());
     }
 
-    // Reducido a 2500 caracteres por bloque para garantizar que entra holgadamente en los 8k tokens de Groq
     let trimmedCode = code;
     if (code.length > 2500) {
         trimmedCode = code.substring(0, 2500) + "\n\n... [Código optimizado] ...";
@@ -60,44 +59,7 @@ app.post('/api/resolve-tcode', async (req, res) => {
         const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'openai/gpt-oss-20b',
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.1
-            })
-        });
-
-        if (!aiResponse.ok) {
-            return res.json({ success: true, resolvedName: cleanInput });
-        }
-
-        const aiData = await aiResponse.json();
-        let guessedName = aiData.choices?.[0]?.message?.content?.trim().toUpperCase();
-        guessedName = guessedName ? guessedName.replace(/[^A-Z0-9_/]/g, '') : cleanInput;
-
-        res.json({ success: true, resolvedName: guessedName || cleanInput });
-    } catch (error) {
-        res.json({ success: true, resolvedName: cleanInput });
-    }
-});
-
-// Endpoint: Generación de documentación por bloques segura para 8k TPM
-app.post('/api/generate-docs', async (req, res) => {
-    const { processDescription, objectsData } = req.body;
-
-    if (!objectsData || objectsData.length === 0) {
-        return res.status(400).json({ success: false, error: 'Faltan objetos para documentar.' });
-    }
-
-    async function callGroqWithRetry(payload, maxRetries = 4) {
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'openai/gpt-oss-20b', messages: [{ role: 'user', content: prompt }], temperature: 0.1 }) });  if (!aiResponse.ok) { return res.json({ success: true, resolvedName: cleanInput }); }  const aiData = await aiResponse.json(); let guessedName = aiData.choices?.[0]?.message?.content?.trim().toUpperCase(); guessedName = guessedName ? guessedName.replace(/[^A-Z0-9_/]/g, '') : cleanInput;  res.json({ success: true, resolvedName: guessedName \vert{}\vert{} cleanInput }); } catch (error) { res.json({ success: true, resolvedName: cleanInput }); } });  // Endpoint: Generación de documentación por bloques segura para 8k TPM con Respaldo Garantizado app.post('/api/generate-docs', async (req, res) => { const { processDescription, objectsData } = req.body;  if (!objectsData \vert{}\vert{} objectsData.length === 0) { return res.status(400).json({ success: false, error: 'Faltan objetos para documentar.' }); }  async function callGroqWithRetry(payload, maxRetries = 4) { for (let attempt = 1; attempt <= maxRetries; attempt++) { const response = await fetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(payload)
@@ -124,16 +86,7 @@ app.post('/api/generate-docs', async (req, res) => {
                 continue;
             }
 
-            throw new Error(`Error Groq (${response.status}): ${errBody}`);
-        }
-        throw new Error('Se superó el límite de reintentos por saturación de tokens en Groq.');
-    }
-
-    try {
-        let globalDependencies = { includes: [], tables: [], bapis: [] };
-        let partialAnalyses = [];
-
-        console.log(`📦 Procesando ${objectsData.length} bloques con pausas de seguridad ampliadas...`);
+            throw new Error(`Error Groq (${response.status}): ${errBody}`); } throw new Error('Se superó el límite de reintentos por saturación de tokens en Groq.'); }  try { let globalDependencies = { includes: [], tables: [], bapis: [] }; let partialAnalyses = [];  console.log(`📦 Procesando ${objectsData.length} bloques con pausas de seguridad ampliadas...`);
 
         for (let i = 0; i < objectsData.length; i++) {
             const obj = objectsData[i];
@@ -157,7 +110,7 @@ app.post('/api/generate-docs', async (req, res) => {
             const summary = mapData.choices?.[0]?.message?.content || '';
             partialAnalyses.push(`- ${obj.name}: ${summary}`);
 
-            // Pausa preventiva ampliada a 8 segundos para limpiar el contador de tokens por minuto (TPM)
+            // Pausa preventiva de 8 segundos para limpiar el contador de tokens por minuto (TPM)
             if (i < objectsData.length - 1) {
                 await new Promise(resolve => setTimeout(resolve, 8000));
             }
@@ -203,16 +156,7 @@ app.post('/api/generate-docs', async (req, res) => {
             temperature: 0.2
         });
 
-        const textResult = reduceData.choices?.[0]?.message?.content || 'No se pudo generar contenido.';
-        res.json({ success: true, documentation: textResult });
+        let textResult = reduceData.choices?.[0]?.message?.content;
 
-    } catch (error) {
-        console.error('Error detallado en backend:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Backend corriendo en puerto ${PORT}`);
-});
+        // Fallback robusto garantizado si la IA devuelve contenido vacío
+        if (!textResult || textResult.trim().length ===
