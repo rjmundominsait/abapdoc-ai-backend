@@ -92,7 +92,7 @@ app.post('/api/resolve-tcode', async (req, res) => {
     }
 });
 
-// Endpoint: Generación de documentación por bloques (Map-Reduce para evitar error 413 de Groq)
+// Endpoint: Generación de documentación por bloques con control de Rate Limit (429) y reintentos automáticos
 app.post('/api/generate-docs', async (req, res) => {
     const { processDescription, objectsData } = req.body;
 
@@ -100,13 +100,52 @@ app.post('/api/generate-docs', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Faltan objetos para documentar.' });
     }
 
+    // Función auxiliar para realizar peticiones a Groq con reintento automático si salta el límite 429
+    async function callGroqWithRetry(payload, maxRetries = 3) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                return await response.json();
+            }
+
+            const errBody = await response.text();
+            
+            // Si es error 429 (Rate Limit), extraemos el tiempo de espera sugerido o esperamos por defecto
+            if (response.status === 429 && attempt < maxRetries) {
+                let waitTimeMs = 15000; // 15 segundos por defecto
+                try {
+                    const parsedErr = JSON.parse(errBody);
+                    const match = parsedErr.error?.message?.match(/try again in ([0-9.]+)s/);
+                    if (match && match[1]) {
+                        waitTimeMs = Math.ceil(parseFloat(match[1]) * 1000) + 1000; // +1s de margen
+                    }
+                } catch (e) {}
+
+                console.warn(`⚠️ Rate Limit (429) alcanzado en Groq. Reintentando en ${waitTimeMs / 1000}s (Intento ${attempt}/${maxRetries})...`);
+                await new Promise(resolve => setTimeout(resolve, waitTimeMs));
+                continue;
+            }
+
+            throw new Error(`Error Groq (${response.status}): ${errBody}`);
+        }
+        throw new Error('Se superó el límite de reintentos por saturación de tokens en Groq.');
+    }
+
     try {
         let globalDependencies = { includes: [], tables: [], bapis: [] };
         let partialAnalyses = [];
 
-        console.log(`📦 Procesando ${objectsData.length} bloques/componentes de forma secuencial...`);
+        console.log(`📦 Procesando ${objectsData.length} bloques/componentes de forma secuencial segura...`);
 
-        // FASE MAP: Analizamos cada bloque o parte de forma individual y segura
+        // FASE MAP: Analizamos cada bloque con pausa preventiva entre peticiones
         for (let i = 0; i < objectsData.length; i++) {
             const obj = objectsData[i];
             const analysis = analyzeAbapDependencies(obj.code);
@@ -123,37 +162,29 @@ app.post('/api/generate-docs', async (req, res) => {
                 ${analysis.trimmedCode}
             `;
 
-            const mapResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: 'openai/gpt-oss-20b',
-                    messages: [
-                        { role: 'system', content: 'Eres un analista SAP experto. Extrae notas técnicas concisas de este fragmento.' },
-                        { role: 'user', content: mapPrompt }
-                    ],
-                    temperature: 0.1
-                })
+            const mapData = await callGroqWithRetry({
+                model: 'openai/gpt-oss-20b',
+                messages: [
+                    { role: 'system', content: 'Eres un analista SAP experto. Extrae notas técnicas concisas de este fragmento.' },
+                    { role: 'user', content: mapPrompt }
+                ],
+                temperature: 0.1
             });
 
-            if (mapResponse.ok) {
-                const mapData = await mapResponse.json();
-                const summary = mapData.choices?.[0]?.message?.content || '';
-                partialAnalyses.push(`--- ANÁLISIS DE ${obj.name} (${obj.type}) ---\n${summary}`);
-            }
+            const summary = mapData.choices?.[0]?.message?.content || '';
+            partialAnalyses.push(`--- ANÁLISIS DE ${obj.name} (${obj.type}) ---\n${summary}`);
 
-            // Breve respiro para cuidar los límites de TPM en llamadas múltiples
-            await new Promise(resolve => setTimeout(resolve, 400));
+            // PAUSA PREVENTIVA: Esperamos 4 segundos obligatorios entre bloque y bloque para no saturar los 8k TPM
+            if (i < objectsData.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 4000));
+            }
         }
 
         globalDependencies.includes = [...new Set(globalDependencies.includes)];
         globalDependencies.tables = [...new Set(globalDependencies.tables)];
         globalDependencies.bapis = [...new Set(globalDependencies.bapis)];
 
-        // FASE REDUCE: Consolidamos todos los análisis parciales en el documento HTML final
+        // FASE REDUCE: Consolidación final del documento HTML
         const reducePrompt = `
             Actúa como un Arquitecto Técnico SAP S/4HANA Senior.
             Con base en los análisis parciales de los bloques de código y las dependencias detectadas, genera una Especificación Técnica y Funcional completa en formato HTML limpio (sin bloques de código markdown como \`\`\`html).
@@ -195,30 +226,16 @@ app.post('/api/generate-docs', async (req, res) => {
             <p>Tablas involucradas y recomendaciones de rendimiento S/4HANA.</p>
         `;
 
-        const reduceResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'openai/gpt-oss-20b',
-                messages: [
-                    { role: 'system', content: 'Eres un Arquitecto SAP experto que genera especificaciones técnicas en HTML limpio.' },
-                    { role: 'user', content: reducePrompt }
-                ],
-                temperature: 0.2
-            })
+        const reduceData = await callGroqWithRetry({
+            model: 'openai/gpt-oss-20b',
+            messages: [
+                { role: 'system', content: 'Eres un Arquitecto SAP experto que genera especificaciones técnicas en HTML limpio.' },
+                { role: 'user', content: reducePrompt }
+            ],
+            temperature: 0.2
         });
 
-        if (!reduceResponse.ok) {
-            const errData = await reduceResponse.text();
-            throw new Error(`Error Groq (${reduceResponse.status}): ${errData}`);
-        }
-
-        const reduceData = await reduceResponse.json();
         const textResult = reduceData.choices?.[0]?.message?.content || 'No se pudo generar contenido.';
-
         res.json({ success: true, documentation: textResult });
 
     } catch (error) {
