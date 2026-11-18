@@ -3,7 +3,9 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-app.use(express.json({ limit: '15mb' }));
+// Ampliado a 50mb para soportar programas y estructuras SAP gigantescas sin errores de payload
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors());
 
 // Motor de extracción estática de dependencias ABAP (con límite estricto por bloque)
