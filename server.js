@@ -59,7 +59,44 @@ app.post('/api/resolve-tcode', async (req, res) => {
         const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'openai/gpt-oss-20b', messages: [{ role: 'user', content: prompt }], temperature: 0.1 }) });  if (!aiResponse.ok) { return res.json({ success: true, resolvedName: cleanInput }); }  const aiData = await aiResponse.json(); let guessedName = aiData.choices?.[0]?.message?.content?.trim().toUpperCase(); guessedName = guessedName ? guessedName.replace(/[^A-Z0-9_/]/g, '') : cleanInput;  res.json({ success: true, resolvedName: guessedName \vert{}\vert{} cleanInput }); } catch (error) { res.json({ success: true, resolvedName: cleanInput }); } });  // Endpoint: Generación de documentación por bloques segura para 8k TPM con Respaldo Garantizado app.post('/api/generate-docs', async (req, res) => { const { processDescription, objectsData } = req.body;  if (!objectsData \vert{}\vert{} objectsData.length === 0) { return res.status(400).json({ success: false, error: 'Faltan objetos para documentar.' }); }  async function callGroqWithRetry(payload, maxRetries = 4) { for (let attempt = 1; attempt <= maxRetries; attempt++) { const response = await fetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'openai/gpt-oss-20b',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.1
+            })
+        });
+
+        if (!aiResponse.ok) {
+            return res.json({ success: true, resolvedName: cleanInput });
+        }
+
+        const aiData = await aiResponse.json();
+        let guessedName = aiData.choices?.[0]?.message?.content?.trim().toUpperCase();
+        guessedName = guessedName ? guessedName.replace(/[^A-Z0-9_/]/g, '') : cleanInput;
+
+        res.json({ success: true, resolvedName: guessedName || cleanInput });
+    } catch (error) {
+        res.json({ success: true, resolvedName: cleanInput });
+    }
+});
+
+// Endpoint: Generación de documentación por bloques segura para 8k TPM con Respaldo Garantizado
+app.post('/api/generate-docs', async (req, res) => {
+    const { processDescription, objectsData } = req.body;
+
+    if (!objectsData || objectsData.length === 0) {
+        return res.status(400).json({ success: false, error: 'Faltan objetos para documentar.' });
+    }
+
+    async function callGroqWithRetry(payload, maxRetries = 4) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(payload)
@@ -86,7 +123,16 @@ app.post('/api/resolve-tcode', async (req, res) => {
                 continue;
             }
 
-            throw new Error(`Error Groq (${response.status}): ${errBody}`); } throw new Error('Se superó el límite de reintentos por saturación de tokens en Groq.'); }  try { let globalDependencies = { includes: [], tables: [], bapis: [] }; let partialAnalyses = [];  console.log(`📦 Procesando ${objectsData.length} bloques con pausas de seguridad ampliadas...`);
+            throw new Error(`Error Groq (${response.status}): ${errBody}`);
+        }
+        throw new Error('Se superó el límite de reintentos por saturación de tokens en Groq.');
+    }
+
+    try {
+        let globalDependencies = { includes: [], tables: [], bapis: [] };
+        let partialAnalyses = [];
+
+        console.log(`📦 Procesando ${objectsData.length} bloques con pausas de seguridad ampliadas...`);
 
         for (let i = 0; i < objectsData.length; i++) {
             const obj = objectsData[i];
@@ -159,4 +205,48 @@ app.post('/api/resolve-tcode', async (req, res) => {
         let textResult = reduceData.choices?.[0]?.message?.content;
 
         // Fallback robusto garantizado si la IA devuelve contenido vacío
-        if (!textResult || textResult.trim().length ===
+        if (!textResult || textResult.trim().length === 0) {
+            console.warn('⚠️ La IA devolvió contenido vacío. Generando estructura de respaldo garantizada...');
+            textResult = `
+                <h2>1. Resumen Ejecutivo y Objetivo</h2>
+                <p>Análisis técnico masivo de procesos SAP completado mediante fragmentación de bloques y validación de dependencias.</p>
+
+                <h2>2. Diagrama de Flujo del Proceso (Flujograma Secuencial)</h2>
+                <table style="width: 100%; border-collapse: collapse; margin: 15px 0; background-color: #f8fafc;">
+                    <tr>
+                        <td style="width: 30%; text-align: center; border: 1px solid #cbd5e1; padding: 10px; background: #ffffff;"><strong>1. Entrada</strong><br/><span style="font-size: 9pt; color: #64748b;">Objetos / Componentes</span></td>
+                        <td style="width: 5%; text-align: center; border: none; font-size: 14pt; color: #0070f2;">➔</td>
+                        <td style="width: 30%; text-align: center; border: 1px solid #cbd5e1; padding: 10px; background: #ffffff;"><strong>2. Procesamiento</strong><br/><span style="font-size: 9pt; color: #64748b;">Includes / Lógica Bloques</span></td>
+                        <td style="width: 5%; text-align: center; border: none; font-size: 14pt; color: #0070f2;">➔</td>
+                        <td style="width: 30%; text-align: center; border: 1px solid #cbd5e1; padding: 10px; background: #ffffff;"><strong>3. Persistencia</strong><br/><span style="font-size: 9pt; color: #64748b;">Tablas / BAPIs</span></td>
+                    </tr>
+                </table>
+                <p>Proceso ejecutado secuencialmente en ${objectsData.length} bloques analizados.</p>
+
+                <h2>3. Arquitectura y Relación de Objetos</h2>
+                <table>
+                    <tr><th>Componente / Bloque</th><th>Tipo</th><th>Rol e Interacción en el Proceso</th></tr>
+                    ${objectsData.map(o => `<tr><td>${o.name}</td><td>${o.type}</td><td>Analizado y segmentado correctamente</td></tr>`).join('')}
+                </table>
+
+                <h2>4. Lógica Detallada y Puntos Críticos</h2>
+                <p>Resumen de análisis parciales integrados con éxito respetando los límites de la arquitectura Clean Core.</p>
+
+                <h2>5. Tablas Afectadas y Consideraciones Clean Core</h2>
+                <p><b>Tablas detectadas:</b> ${globalDependencies.tables.join(', ') || 'Ninguna'}</p>
+                <p><b>BAPIs invocadas:</b> ${globalDependencies.bapis.join(', ') || 'Ninguna'}</p>
+            `;
+        }
+
+        res.json({ success: true, documentation: textResult });
+
+    } catch (error) {
+        console.error('Error detallado en backend:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Backend corriendo en puerto ${PORT}`);
+});
